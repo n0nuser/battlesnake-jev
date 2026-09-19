@@ -1,0 +1,5 @@
+#!/bin/sh
+# Installed by `make hooks`. Blocks a push when the quality gate fails.
+set -e
+echo "pre-push: running 'make check'..."
+make check
