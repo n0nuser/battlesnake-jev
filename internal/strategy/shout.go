@@ -42,7 +42,7 @@ func (d Decision) Shout() string {
 	if d.Mode != "" {
 		fmt.Fprintf(&b, " · %s", d.Mode)
 	}
-	if c, ok := chosen(d); ok {
+	if c, ok := d.Chosen(); ok {
 		fmt.Fprintf(&b, " · %d free", c.Space)
 		if !c.TailSafe {
 			b.WriteString(", tail cut off")
@@ -63,16 +63,6 @@ func (d Decision) Shout() string {
 		out = out[:maxShout]
 	}
 	return out
-}
-
-// chosen finds the candidate that was actually played.
-func chosen(d Decision) (Candidate, bool) {
-	for _, c := range d.Candidates {
-		if c.Dir.String() == d.Move {
-			return c, true
-		}
-	}
-	return Candidate{}, false
 }
 
 // alarmWord names which warning fired, for the board.

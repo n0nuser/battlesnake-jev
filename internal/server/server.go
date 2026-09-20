@@ -103,11 +103,18 @@ func (h *Handler) handleMove(w http.ResponseWriter, r *http.Request) {
 	// which of the two decided this move and on what grounds.
 	writeJSON(w, api.MoveResponse{Move: decision.Move, Shout: decision.Shout()}, h.log)
 
+	space, tailSafe := -1, false
+	if c, ok := decision.Chosen(); ok {
+		space, tailSafe = c.Space, c.TailSafe
+	}
 	h.log.Debug("move",
 		"game", req.Game.ID, "turn", req.Turn, "move", decision.Move,
 		"reason", decision.Reason, "mode", decision.Mode,
 		"health", req.You.Health, "length", req.You.Length,
-		"tokens", decision.Tokens, "took", time.Since(start))
+		"tokens", decision.Tokens,
+		"sealed", decision.Advice.Sealed, "hunted", decision.Advice.Hunted,
+		"space", space, "tailsafe", tailSafe,
+		"took", time.Since(start))
 }
 
 func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {

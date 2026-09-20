@@ -60,7 +60,43 @@ times the tokens. It exists as a measurement mode, not a playing mode.
 
 ## Duels, selective mode
 
-_(filled in by the current run)_
+Seeds 9001-9020, 11x11, `-t 2000`, one Jev snake against one deterministic one.
+
+| Configuration | Jev | Det | Draw | Tokens | Cost |
+| --- | --- | --- | --- | --- | --- |
+| Default (board, selective tie-break) | 9 | 10 | 1 | 555,819 | $0.0233 |
+| Plus advisory nouls | 8 | 10 | 2 | 690,123 | $0.0290 |
+
+Neither is distinguishable from a coin flip, and the second comparison turned
+out to measure nothing at all - see below.
+
+## The advisory questions do not carry enough signal
+
+Two noul questions were added alongside the move: whether the position is about
+to close around us, and whether a rival is manoeuvring to cut us off. The idea
+was sound - a one-ply flood fill cannot tell a tight corridor from a closing
+trap - but the measurement says the questions as written do not work.
+
+They never fired. Over a full game the probabilities never crossed the 0.65
+alarm threshold: `sealed` peaked at 0.42 and `hunted` at 0.56. The 8-10-2 above
+therefore tested an inert feature.
+
+Checking the signal directly, over 364 turns with both an advisory answer and
+the measured flood-fill space for the move played:
+
+| Signal | Correlation with space | Reading |
+| --- | --- | --- |
+| `sealed` | -0.278 | Real, in the right direction, but weak |
+| `hunted` | -0.085 | No usable signal |
+
+Mean `sealed` was 0.376 in the tightest quarter of positions against 0.312 in
+the roomiest: a separation of 0.06 across the whole range of the board. The
+model hedges because it is being asked a yes/no about a rare future event, and
+because much of what it can see there is what the flood fill already computes.
+
+Next: `hunted` is dropped, and confinement is asked as a Score - a degree along
+a described dimension, which is what the primitive is for - and consumed as a
+continuous weight rather than a threshold.
 
 ## Things that did not work
 
@@ -90,5 +126,8 @@ Input tokens at $0.042 per million; output is free.
 | Batch | Tokens | Cost |
 | --- | --- | --- |
 | Exploration and A/B runs up to 02:30 | ~8.2M | $0.345 |
+| Overnight: baseline duels (n=20) | 0.56M | $0.023 |
+| Overnight: advisory duels (n=20) | 0.69M | $0.029 |
+| Overnight: signal-quality diagnostics | ~0.7M | $0.029 |
 
 Running total for the overnight session is updated as batches complete.

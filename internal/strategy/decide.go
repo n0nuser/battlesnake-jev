@@ -110,6 +110,17 @@ type Decision struct {
 	Advice     Advice
 }
 
+// Chosen returns the scored candidate that was actually played, when the move
+// came from the scored set.
+func (d Decision) Chosen() (Candidate, bool) {
+	for _, c := range d.Candidates {
+		if c.Dir.String() == d.Move {
+			return c, true
+		}
+	}
+	return Candidate{}, false
+}
+
 // Advice holds the model's read of the position, separate from its move.
 type Advice struct {
 	// Sealed is the probability we are about to be shut into a region we
