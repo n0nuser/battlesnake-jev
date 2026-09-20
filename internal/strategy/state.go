@@ -65,6 +65,7 @@ type GameState struct {
 	calls       atomic.Int64
 	inputTokens atomic.Int64
 	fallbacks   atomic.Int64
+	overrides   atomic.Int64
 }
 
 // situation is the coarse fingerprint used to decide whether the posture is
@@ -106,8 +107,12 @@ func (g *GameState) observeLatency(d time.Duration) {
 
 // Stats reports what this game spent, which is the headline number for a
 // project whose goal is the fewest input tokens for the best play.
-func (g *GameState) Stats() (calls, inputTokens, fallbacks int64) {
-	return g.calls.Load(), g.inputTokens.Load(), g.fallbacks.Load()
+//
+// Overrides counts the turns where inference picked a different move from the
+// deterministic scorer. It is the measure of how much the model is actually
+// changing, as opposed to agreeing with, the code.
+func (g *GameState) Stats() (calls, inputTokens, fallbacks, overrides int64) {
+	return g.calls.Load(), g.inputTokens.Load(), g.fallbacks.Load(), g.overrides.Load()
 }
 
 // Store holds live games. A game that never receives /end would otherwise leak,

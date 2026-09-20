@@ -248,7 +248,20 @@ const (
 // could move into the same square. The longer snake survives a head-to-head
 // and equal lengths eliminate both, so the worst outcome found is returned.
 func HeadToHeadRisk(target api.Coord, b api.Board, you api.Battlesnake) H2HRisk {
-	worst := H2HNone
+	risk, _ := HeadToHead(target, b, you)
+	return risk
+}
+
+// HeadToHead returns the worst outcome of moving into target and how many
+// rivals could contest that square.
+//
+// The count matters as much as the outcome. In the opening every snake is the
+// same length, so every square near the middle is a mutual kill and a snake can
+// find that all of its moves are fatal. What separates those moves is how many
+// rivals would have to choose that same square: one rival is a coin flip, three
+// is close to certain. Counting them turns a set of equally fatal options into
+// a ranked one.
+func HeadToHead(target api.Coord, b api.Board, you api.Battlesnake) (worst H2HRisk, contesters int) {
 	for i := range b.Snakes {
 		s := &b.Snakes[i]
 		if s.ID == you.ID {
@@ -257,6 +270,7 @@ func HeadToHeadRisk(target api.Coord, b api.Board, you api.Battlesnake) H2HRisk 
 		if ManhattanDistance(s.Head, target) != 1 {
 			continue
 		}
+		contesters++
 		var risk H2HRisk
 		switch {
 		case s.Length > you.Length:
@@ -270,7 +284,7 @@ func HeadToHeadRisk(target api.Coord, b api.Board, you api.Battlesnake) H2HRisk 
 			worst = risk
 		}
 	}
-	return worst
+	return worst, contesters
 }
 
 func abs(n int) int {

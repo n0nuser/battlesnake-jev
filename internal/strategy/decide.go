@@ -28,7 +28,27 @@ type Config struct {
 	CloseEnough float64
 	// LowHealth is the health at which finding food overrides the posture.
 	LowHealth int
+	// BoardInState draws the board into the inference state. Without it the
+	// model only sees the numbers the scorer already computed, and can only
+	// re-rank them; with it, it sees the shape those numbers flatten away.
+	BoardInState bool
+	// AlwaysAsk consults inference on every turn that has a real choice,
+	// skipping the cheap-path gates. It is for measuring what the model
+	// contributes, not for ordinary play: it spends roughly five times the
+	// tokens and still cannot beat the turn deadline any more often.
+	AlwaysAsk bool
 }
+
+// Penalties for the two head-to-head outcomes that kill us. They are close
+// together because both are fatal; a loss is only fractionally worse in that it
+// leaves the rival alive.
+const (
+	tiePenalty  = 0.95
+	losePenalty = 1.00
+	// crowdPenalty is added for each rival beyond the first that can contest
+	// the square, so a standoff against one snake outranks one against three.
+	crowdPenalty = 0.15
+)
 
 // DefaultConfig is tuned from the measured warm latency of the inference API.
 func DefaultConfig() Config {
@@ -79,14 +99,15 @@ type Decision struct {
 
 // Candidate is one scored move.
 type Candidate struct {
-	Dir      game.Direction
-	Space    int
-	FoodDist int
-	HasFood  bool
-	TailSafe bool
-	H2H      game.H2HRisk
-	Hazard   bool
-	Score    float64
+	Dir        game.Direction
+	Space      int
+	FoodDist   int
+	HasFood    bool
+	TailSafe   bool
+	H2H        game.H2HRisk
+	Contesters int
+	Hazard     bool
+	Score      float64
 }
 
 // Decider turns board states into moves.
@@ -160,7 +181,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 	if len(cands) == 1 {
 		return decide(ReasonOnlyMove)
 	}
-	if cands[0].Score-cands[1].Score > d.cfg.CloseEnough {
+	if !d.cfg.AlwaysAsk && cands[0].Score-cands[1].Score > d.cfg.CloseEnough {
 		return decide(ReasonClearWinner)
 	}
 	// A close score is not on its own a reason to ask. On an open board the
@@ -168,7 +189,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 	// same tail access, same risk, same distance to food - and a judgment
 	// between interchangeable options buys nothing for the tokens it costs.
 	// Inference is worth paying for only when the options genuinely trade off.
-	if features(cands[0]) == features(cands[1]) {
+	if !d.cfg.AlwaysAsk && features(cands[0]) == features(cands[1]) {
 		return decide(ReasonInterchangeable)
 	}
 	if !d.cfg.TieBreak || d.asker == nil {
@@ -187,7 +208,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 	askCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
-	resp, err := d.asker.Ask(askCtx, tieBreakRequest(req, mode, cands))
+	resp, err := d.asker.Ask(askCtx, tieBreakRequest(req, mode, cands, d.cfg.BoardInState))
 	if err != nil {
 		gs.fallbacks.Add(1)
 		d.log.Warn("tie-break inference failed, using deterministic move",
@@ -215,6 +236,10 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 		return decide(ReasonJevFailed)
 	}
 
+	if chosen.Dir != best.Dir {
+		gs.overrides.Add(1)
+	}
+
 	return Decision{
 		Move:       chosen.Dir.String(),
 		Reason:     ReasonJev,
@@ -238,14 +263,16 @@ func (d *Decider) score(grid *game.Grid, req api.GameRequest, mode Mode, safe []
 		target := dir.Apply(req.You.Head)
 		space, tailSafe := game.FloodReach(grid, target, tail)
 		foodDist, hasFood := game.NearestFoodDistance(target, req.Board.Food)
+		risk, contesters := game.HeadToHead(target, req.Board, req.You)
 		c := Candidate{
-			Dir:      dir,
-			Space:    space,
-			FoodDist: foodDist,
-			HasFood:  hasFood,
-			TailSafe: tailSafe,
-			H2H:      game.HeadToHeadRisk(target, req.Board, req.You),
-			Hazard:   game.HazardAt(target, req.Board.Hazards),
+			Dir:        dir,
+			Space:      space,
+			FoodDist:   foodDist,
+			HasFood:    hasFood,
+			TailSafe:   tailSafe,
+			H2H:        risk,
+			Contesters: contesters,
+			Hazard:     game.HazardAt(target, req.Board.Hazards),
 		}
 
 		// Space is measured against our own length: a pocket smaller than the
@@ -275,9 +302,15 @@ func (d *Decider) score(grid *game.Grid, req api.GameRequest, mode Mode, safe []
 		case game.H2HWin:
 			c.Score += w.hunt
 		case game.H2HTie:
-			c.Score -= 0.60
+			// A tie eliminates both snakes, so it kills us exactly as dead as
+			// a loss does; the only difference is that we take the rival with
+			// us. It is penalised almost as hard for that reason. This matters
+			// most in the opening, when every snake is the same length and so
+			// every head-to-head is a tie - which is what was wiping out two
+			// snakes at a time around turn ten.
+			c.Score -= tiePenalty + crowdPenalty*float64(c.Contesters-1)
 		case game.H2HLose:
-			c.Score -= 1.00
+			c.Score -= losePenalty + crowdPenalty*float64(c.Contesters-1)
 		case game.H2HNone:
 		}
 		if c.Hazard {
@@ -303,6 +336,7 @@ type featureSet struct {
 	foodBucket  int
 	tailSafe    bool
 	h2h         game.H2HRisk
+	contesters  int
 	hazard      bool
 }
 
@@ -316,6 +350,7 @@ func features(c Candidate) featureSet {
 		foodBucket:  food,
 		tailSafe:    c.TailSafe,
 		h2h:         c.H2H,
+		contesters:  c.Contesters,
 		hazard:      c.Hazard,
 	}
 }
@@ -399,20 +434,25 @@ func matchCandidate(name string, cands []Candidate) (Candidate, bool) {
 // dropped in favour of a computed digest. And the options offered are only the
 // moves already proven safe, each labelled with its computed consequence, so
 // the model judges trade-offs rather than redoing geometry.
-func tieBreakRequest(req api.GameRequest, mode Mode, cands []Candidate) jev.Request {
+func tieBreakRequest(req api.GameRequest, mode Mode, cands []Candidate, withBoard bool) jev.Request {
 	criteria := make(map[string]string, len(cands))
 	for _, c := range cands {
 		criteria[c.Dir.String()] = describe(c, req.You.Length)
 	}
+	state := map[string]any{
+		"turn":     req.Turn,
+		"health":   req.You.Health,
+		"length":   req.You.Length,
+		"longest":  longestOpponent(req),
+		"rivals":   len(req.Board.Snakes) - 1,
+		"strategy": string(mode),
+	}
+	if withBoard {
+		state["board"] = renderBoard(req.Board, req.You)
+		state["legend"] = "H my head, # my body, E rival head, + rival body, o food, x hazard, . empty; top row is the far side of the board from y=0"
+	}
 	return jev.Request{
-		State: map[string]any{
-			"turn":     req.Turn,
-			"health":   req.You.Health,
-			"length":   req.You.Length,
-			"longest":  longestOpponent(req),
-			"rivals":   len(req.Board.Snakes) - 1,
-			"strategy": string(mode),
-		},
+		State: state,
 		Questions: map[string]jev.Question{
 			"move": {
 				Type: jev.TypeChoice,
@@ -449,9 +489,9 @@ func describe(c Candidate, myLength int) string {
 	case game.H2HWin:
 		b.WriteString(", h2h win")
 	case game.H2HTie:
-		b.WriteString(", h2h both die")
+		fmt.Fprintf(&b, ", h2h both die vs %d rival(s)", c.Contesters)
 	case game.H2HLose:
-		b.WriteString(", h2h lose")
+		fmt.Fprintf(&b, ", h2h lose vs %d rival(s)", c.Contesters)
 	case game.H2HNone:
 		b.WriteString(", h2h none")
 	}

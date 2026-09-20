@@ -349,3 +349,35 @@ func TestEdgeDistance(t *testing.T) {
 		})
 	}
 }
+
+func TestHeadToHeadCountsContesters(t *testing.T) {
+	// The turn-7 standoff that wiped out two snakes: four equal-length snakes
+	// around the centre, every nearby square contested.
+	me := snake("me", 95, coord(5, 4), coord(5, 3), coord(5, 2), coord(5, 1))
+	left := snake("l", 95, coord(4, 5), coord(3, 5), coord(2, 5), coord(1, 5))
+	up := snake("u", 95, coord(5, 6), coord(5, 7), coord(5, 8), coord(5, 9))
+	right := snake("r", 95, coord(6, 5), coord(7, 5), coord(8, 5), coord(9, 5))
+	b := board(11, 11, me, left, up, right)
+
+	tests := []struct {
+		name           string
+		target         api.Coord
+		wantRisk       H2HRisk
+		wantContesters int
+	}{
+		{"the contested centre square", coord(5, 5), H2HTie, 3},
+		{"a square only one rival can reach", coord(4, 4), H2HTie, 1},
+		{"a square no rival can reach", coord(7, 1), H2HNone, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			risk, contesters := HeadToHead(tc.target, b, me)
+			if risk != tc.wantRisk {
+				t.Errorf("risk = %d, want %d", risk, tc.wantRisk)
+			}
+			if contesters != tc.wantContesters {
+				t.Errorf("contesters = %d, want %d", contesters, tc.wantContesters)
+			}
+		})
+	}
+}

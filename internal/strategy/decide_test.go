@@ -262,7 +262,7 @@ func TestDecideUsesInferenceOnAGenuineTradeOff(t *testing.T) {
 	if got.Tokens != 400 {
 		t.Errorf("Tokens = %d, want 400", got.Tokens)
 	}
-	if calls, tokens, _ := gs.Stats(); calls == 0 || tokens == 0 {
+	if calls, tokens, _, _ := gs.Stats(); calls == 0 || tokens == 0 {
 		t.Errorf("Stats() = (%d, %d), want both non-zero", calls, tokens)
 	}
 }
@@ -311,7 +311,7 @@ func TestDecideFallsBackWhenInferenceMisbehaves(t *testing.T) {
 			if elapsed > 500*time.Millisecond {
 				t.Errorf("took %v, which is past the turn deadline", elapsed)
 			}
-			if _, _, fallbacks := gs.Stats(); fallbacks != 1 {
+			if _, _, fallbacks, _ := gs.Stats(); fallbacks != 1 {
 				t.Errorf("fallbacks = %d, want 1", fallbacks)
 			}
 		})
@@ -352,7 +352,7 @@ func TestTieBreakRequestSendsOnlySafeMovesAndNoIdentifiers(t *testing.T) {
 		{Dir: game.Right, Space: 18, FoodDist: 7, HasFood: true, H2H: game.H2HLose},
 	}
 
-	got := tieBreakRequest(req, ModeSurvive, cands)
+	got := tieBreakRequest(req, ModeSurvive, cands, false)
 
 	criteria, ok := got.Questions["move"].Criteria.(map[string]string)
 	if !ok {
@@ -505,5 +505,146 @@ func TestFeaturesIgnoreTrivialDifferences(t *testing.T) {
 	realDifference.TailSafe = false
 	if features(base) == features(realDifference) {
 		t.Error("losing tail access is a trade-off and must be visible")
+	}
+}
+
+// TestAlwaysAskBypassesTheCheapPaths covers the measurement mode: when it is on,
+// a real choice always reaches inference even if the deterministic scores were
+// decisive or the options were interchangeable.
+func TestAlwaysAskBypassesTheCheapPaths(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.AlwaysAsk = true
+
+	tests := []struct {
+		name string
+		req  api.GameRequest
+	}{
+		{
+			name: "options that are interchangeable",
+			req: request([]api.Battlesnake{
+				snake("me", 90, coord(5, 5), coord(5, 4), coord(5, 3)),
+			}, nil),
+		},
+		{
+			name: "a decisive deterministic winner",
+			req: request([]api.Battlesnake{
+				snake("me", 90, coord(0, 5), coord(0, 4), coord(0, 3)),
+				snake("rival", 90, coord(2, 5), coord(3, 5), coord(4, 5), coord(5, 5)),
+			}, nil),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFake("up")
+			d := NewDecider(fake, cfg, quietLogger())
+			got := d.Decide(withDeadline(t, 500*time.Millisecond), tc.req, newGameState("g1"))
+			if got.Reason != ReasonJev {
+				t.Errorf("Reason = %q, want %q", got.Reason, ReasonJev)
+			}
+			if n := fake.count("move"); n != 1 {
+				t.Errorf("inference calls = %d, want 1", n)
+			}
+		})
+	}
+}
+
+// TestAlwaysAskStillRefusesUnsafeAnswers: measurement mode must not weaken the
+// safety guarantee.
+func TestAlwaysAskStillRefusesUnsafeAnswers(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.AlwaysAsk = true
+	fake := newFake("right") // walks into our own neck
+	d := NewDecider(fake, cfg, quietLogger())
+
+	req := request([]api.Battlesnake{
+		snake("me", 90, coord(0, 0), coord(1, 0), coord(2, 0)),
+	}, nil)
+
+	got := d.Decide(withDeadline(t, 500*time.Millisecond), req, newGameState("g1"))
+	if got.Move != "up" {
+		t.Errorf("Move = %q, want \"up\": an unsafe answer must never be played", got.Move)
+	}
+}
+
+// TestOverridesAreCounted: knowing how often the model disagrees with the code
+// is the only way to tell whether it is contributing or just agreeing.
+func TestOverridesAreCounted(t *testing.T) {
+	gs := newGameState("g1")
+	fake := newFake("right") // the deterministic pick here is "left"
+	d := NewDecider(fake, DefaultConfig(), quietLogger())
+
+	got := d.Decide(withDeadline(t, 500*time.Millisecond), tradeOffRequest(), gs)
+	if got.Reason != ReasonJev {
+		t.Fatalf("Reason = %q, want %q", got.Reason, ReasonJev)
+	}
+	if _, _, _, overrides := gs.Stats(); overrides != 1 {
+		t.Errorf("overrides = %d, want 1", overrides)
+	}
+
+	agreeing := newGameState("g2")
+	agree := newFake("left") // matches the deterministic pick
+	da := NewDecider(agree, DefaultConfig(), quietLogger())
+	da.Decide(withDeadline(t, 500*time.Millisecond), tradeOffRequest(), agreeing)
+	if _, _, _, overrides := agreeing.Stats(); overrides != 0 {
+		t.Errorf("overrides = %d when the model agreed, want 0", overrides)
+	}
+}
+
+// TestATieIsPenalisedLikeADeath guards the weighting that was letting snakes
+// trade themselves away in the opening, when every snake is the same length and
+// so every head-to-head eliminates both.
+func TestATieIsPenalisedLikeADeath(t *testing.T) {
+	if losePenalty-tiePenalty > 0.10 {
+		t.Errorf("tie penalty %.2f is far below the loss penalty %.2f, but both are fatal",
+			tiePenalty, losePenalty)
+	}
+
+	// Our head at (5,5); an equal-length rival two squares to the right, so
+	// moving right is a mutual kill. Every other safe move must beat it.
+	me := snake("me", 90, coord(5, 5), coord(5, 4), coord(5, 3))
+	rival := snake("rival", 90, coord(7, 5), coord(8, 5), coord(9, 5))
+	req := request([]api.Battlesnake{me, rival}, []api.Coord{coord(7, 6)})
+
+	d := NewDecider(nil, DefaultConfig(), quietLogger())
+	got := d.Decide(withDeadline(t, 500*time.Millisecond), req, newGameState("g1"))
+
+	if got.Move == "right" {
+		t.Error("walked into an equal-length head-to-head, which eliminates us too")
+	}
+	for _, c := range got.Candidates {
+		if c.H2H == game.H2HTie && c.Dir.String() == got.Move {
+			t.Errorf("chose %q despite a mutual-kill risk", got.Move)
+		}
+	}
+}
+
+// TestStandoffPrefersTheLeastContestedSquare reproduces the opening standoff
+// that was killing two snakes at once: four equal-length snakes around the
+// centre, where every move risks a mutual kill. The scorer cannot avoid the
+// risk, but it can take the one that fewest rivals can contest.
+func TestStandoffPrefersTheLeastContestedSquare(t *testing.T) {
+	me := snake("me", 95, coord(4, 5), coord(3, 5), coord(2, 5), coord(1, 5))
+	up := snake("u", 95, coord(5, 6), coord(5, 7), coord(5, 8), coord(5, 9))
+	down := snake("d", 95, coord(5, 4), coord(5, 3), coord(5, 2), coord(5, 1))
+	right := snake("r", 95, coord(6, 5), coord(7, 5), coord(8, 5), coord(9, 5))
+	req := request([]api.Battlesnake{me, up, down, right}, []api.Coord{coord(5, 5)})
+
+	d := NewDecider(nil, DefaultConfig(), quietLogger())
+	got := d.Decide(withDeadline(t, 500*time.Millisecond), req, newGameState("g1"))
+
+	byDir := map[string]Candidate{}
+	for _, c := range got.Candidates {
+		byDir[c.Dir.String()] = c
+	}
+	// Moving right onto the food is contested by three rivals; up and down by
+	// one each. The food must not buy the crowded square.
+	if got.Move == "right" {
+		t.Errorf("took the square three rivals contest (%d contesters) for the food",
+			byDir["right"].Contesters)
+	}
+	if c, ok := byDir[got.Move]; ok && c.Contesters > 1 {
+		t.Errorf("chose %q with %d contesters when a less contested move existed",
+			got.Move, c.Contesters)
 	}
 }

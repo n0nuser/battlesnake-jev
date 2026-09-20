@@ -61,7 +61,7 @@ func (h *Handler) handleStart(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.store.Start(req.Game.ID)
+	h.store.Start(stateKey(req))
 	h.log.Info("game started",
 		"game", req.Game.ID, "ruleset", req.Game.Ruleset.Name,
 		"map", req.Game.Map, "timeout_ms", req.Game.Timeout,
@@ -96,7 +96,7 @@ func (h *Handler) handleMove(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	gs := h.store.Get(req.Game.ID)
+	gs := h.store.Get(stateKey(req))
 	decision := h.decider.Decide(ctx, req, gs)
 
 	writeJSON(w, api.MoveResponse{Move: decision.Move}, h.log)
@@ -113,16 +113,27 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	gs := h.store.End(req.Game.ID)
+	gs := h.store.End(stateKey(req))
 	if gs != nil {
-		calls, tokens, fallbacks := gs.Stats()
+		calls, tokens, fallbacks, overrides := gs.Stats()
 		h.log.Info("game ended",
 			"game", req.Game.ID, "turns", req.Turn,
 			"alive", isAlive(req),
 			"inference_calls", calls, "input_tokens", tokens,
-			"fallbacks", fallbacks, "final_mode", gs.Mode())
+			"fallbacks", fallbacks, "overrides", overrides,
+			"final_mode", gs.Mode())
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// stateKey identifies one snake in one game.
+//
+// The game id alone is not enough: this server can be the backend for several
+// snakes in the same match, which is how a one-against-three game is set up.
+// Keying on the game alone would make those snakes share a posture, a latency
+// estimate and a token count.
+func stateKey(req api.GameRequest) string {
+	return req.Game.ID + "/" + req.You.ID
 }
 
 // isAlive reports whether we were still on the board when the game ended.

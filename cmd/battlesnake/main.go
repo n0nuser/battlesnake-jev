@@ -8,9 +8,16 @@
 //	                     deterministic, which is a supported mode
 //	JEV_TIEBREAK         set to "false" to keep inference to the background
 //	                     posture only, the documented degraded mode
+//	JEV_BOARD_STATE      draw the board into the inference state (default on;
+//	                     without it the model sees only the scorer's numbers
+//	                     and loses roughly four duels in ten to the plain bot)
+//	JEV_ALWAYS_ASK       consult the model on every turn with a real choice,
+//	                     for measuring its contribution rather than for play
 //	JEV_MARGIN_MS        slack held back from the turn budget (default 120)
 //	LOG_LEVEL            debug, info, warn or error (default info)
 //	SNAKE_AUTHOR, SNAKE_COLOR, SNAKE_HEAD, SNAKE_TAIL
+//	                     an unset colour, head or tail is randomised per
+//	                     process, so snakes in the same match look different
 package main
 
 import (
@@ -47,6 +54,8 @@ func run() error {
 	cfg := strategy.DefaultConfig()
 	cfg.TieBreak = envBool("JEV_TIEBREAK", true)
 	cfg.Margin = time.Duration(envInt("JEV_MARGIN_MS", 120)) * time.Millisecond
+	cfg.AlwaysAsk = envBool("JEV_ALWAYS_ASK", false)
+	cfg.BoardInState = envBool("JEV_BOARD_STATE", true)
 
 	var (
 		asker  jev.Asker
@@ -56,7 +65,9 @@ func run() error {
 		client := jev.New(key)
 		asker, warmer = client, client
 		log.Info("inference enabled",
-			"model", jev.DefaultModel, "tiebreak", cfg.TieBreak, "margin", cfg.Margin)
+			"model", jev.DefaultModel, "tiebreak", cfg.TieBreak,
+			"always_ask", cfg.AlwaysAsk, "board_state", cfg.BoardInState,
+			"margin", cfg.Margin)
 
 		// Pay the TLS handshake before any game arrives. A cold connect costs
 		// more than a whole turn budget, and waiting for the first /start
@@ -74,14 +85,20 @@ func run() error {
 		log.Warn("TYPESAFE_API_KEY is not set: playing deterministically")
 	}
 
+	// Several of these servers play in the same match, so an unset look is
+	// randomised per process rather than defaulted: otherwise every snake on
+	// the board turns up wearing the same outfit. The port seeds the colour so
+	// that snakes on neighbouring ports get well-separated hues.
+	color, head, tail := api.RandomCustomization(envInt("PORT", 8080))
 	info := api.InfoResponse{
 		APIVersion: "1",
 		Author:     envStr("SNAKE_AUTHOR", "n0nuser"),
-		Color:      envStr("SNAKE_COLOR", "#4B8BBE"),
-		Head:       envStr("SNAKE_HEAD", "smart-caterpillar"),
-		Tail:       envStr("SNAKE_TAIL", "weight"),
+		Color:      envStr("SNAKE_COLOR", color),
+		Head:       envStr("SNAKE_HEAD", head),
+		Tail:       envStr("SNAKE_TAIL", tail),
 		Version:    envStr("SNAKE_VERSION", "0.1.0"),
 	}
+	log.Info("snake look", "color", info.Color, "head", info.Head, "tail", info.Tail)
 
 	handler := server.New(info, strategy.NewStore(gameTTL), strategy.NewDecider(asker, cfg, log), warmer, log)
 

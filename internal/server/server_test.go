@@ -248,3 +248,32 @@ func TestConcurrentGames(t *testing.T) {
 		t.Errorf("live games = %d, want %d", store.Len(), games)
 	}
 }
+
+// TestSnakesInTheSameGameKeepSeparateState covers the one-against-three setup,
+// where this server is the backend for several snakes in a single match.
+func TestSnakesInTheSameGameKeepSeparateState(t *testing.T) {
+	store := strategy.NewStore(time.Hour)
+	log := quietLogger()
+	h := New(api.InfoResponse{APIVersion: "1"}, store,
+		strategy.NewDecider(nil, strategy.DefaultConfig(), log), nil, log)
+	srv := httptest.NewServer(h.Routes())
+	defer srv.Close()
+
+	// Same game id, different snake ids: the two snakes in the example board.
+	forSnake := func(id string) string {
+		return strings.ReplaceAll(exampleMoveRequest,
+			`"you": {"id": "snake-508e96ac-94ad-11ea-bb37"`, `"you": {"id": "`+id+`"`)
+	}
+
+	for _, id := range []string{"snake-508e96ac-94ad-11ea-bb37", "snake-b67f4906-94ae-11ea-bb37"} {
+		resp, err := http.Post(srv.URL+"/start", "application/json", strings.NewReader(forSnake(id)))
+		if err != nil {
+			t.Fatalf("POST /start for %s: %v", id, err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	if store.Len() != 2 {
+		t.Errorf("tracked states = %d, want 2: snakes in one game must not share state", store.Len())
+	}
+}

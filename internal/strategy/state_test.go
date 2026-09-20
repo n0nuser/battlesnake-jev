@@ -50,7 +50,7 @@ func TestStoreIsolatesGames(t *testing.T) {
 	}
 
 	a.inputTokens.Add(500)
-	if _, tokens, _ := b.Stats(); tokens != 0 {
+	if _, tokens, _, _ := b.Stats(); tokens != 0 {
 		t.Errorf("game b's token count = %d, want 0", tokens)
 	}
 }
