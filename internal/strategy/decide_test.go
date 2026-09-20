@@ -24,6 +24,7 @@ type fakeAsker struct {
 	err     error
 	latency time.Duration
 	block   chan struct{}
+	nouls   map[string]float64
 }
 
 func newFake(answer string) *fakeAsker {
@@ -49,8 +50,16 @@ func (f *fakeAsker) Ask(ctx context.Context, req jev.Request) (*jev.Response, er
 		return nil, err
 	}
 
+	f.mu.Lock()
+	nouls := f.nouls
+	f.mu.Unlock()
+
 	answers := make(map[string]jev.Answer, len(req.Questions))
-	for id := range req.Questions {
+	for id, q := range req.Questions {
+		if q.Type == jev.TypeNoul {
+			answers[id] = jev.Answer{Type: jev.TypeNoul, Noul: nouls[id]}
+			continue
+		}
 		answers[id] = jev.Answer{Type: jev.TypeChoice, Choice: answer, Confidence: 0.9}
 	}
 	return &jev.Response{
@@ -352,7 +361,7 @@ func TestTieBreakRequestSendsOnlySafeMovesAndNoIdentifiers(t *testing.T) {
 		{Dir: game.Right, Space: 18, FoodDist: 7, HasFood: true, H2H: game.H2HLose},
 	}
 
-	got := tieBreakRequest(req, ModeSurvive, cands, false)
+	got := tieBreakRequest(req, ModeSurvive, cands, false, false)
 
 	criteria, ok := got.Questions["move"].Criteria.(map[string]string)
 	if !ok {

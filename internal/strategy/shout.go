@@ -21,6 +21,8 @@ func (d Decision) Shout() string {
 	switch d.Reason {
 	case ReasonJev:
 		fmt.Fprintf(&b, "jev %s (%.0f%%)", d.Move, d.Confidence*100)
+	case ReasonJevAlarm:
+		fmt.Fprintf(&b, "jev: %s, playing %s safe", alarmWord(d.Advice), d.Move)
 	case ReasonJevFailed:
 		fmt.Fprintf(&b, "jev timed out, code says %s", d.Move)
 	case ReasonOnlyMove:
@@ -50,6 +52,12 @@ func (d Decision) Shout() string {
 		}
 	}
 
+	if d.Advice.Present && d.Reason != ReasonJevAlarm {
+		if w := strongestWarning(d.Advice); w != "" {
+			b.WriteString(" · " + w)
+		}
+	}
+
 	out := b.String()
 	if len(out) > maxShout {
 		out = out[:maxShout]
@@ -65,4 +73,24 @@ func chosen(d Decision) (Candidate, bool) {
 		}
 	}
 	return Candidate{}, false
+}
+
+// alarmWord names which warning fired, for the board.
+func alarmWord(a Advice) string {
+	if a.Hunted >= a.Sealed {
+		return fmt.Sprintf("being cut off (%.0f%%)", a.Hunted*100)
+	}
+	return fmt.Sprintf("space closing (%.0f%%)", a.Sealed*100)
+}
+
+// strongestWarning reports a warning worth showing even when it did not fire.
+func strongestWarning(a Advice) string {
+	switch {
+	case a.Sealed >= 0.35 && a.Sealed >= a.Hunted:
+		return fmt.Sprintf("closing %.0f%%", a.Sealed*100)
+	case a.Hunted >= 0.35:
+		return fmt.Sprintf("hunted %.0f%%", a.Hunted*100)
+	default:
+		return ""
+	}
 }

@@ -8,6 +8,8 @@
 //	                     deterministic, which is a supported mode
 //	JEV_TIEBREAK         set to "false" to keep inference to the background
 //	                     posture only, the documented degraded mode
+//	JEV_ADVISORS         also ask, in the same request, whether the position is
+//	                     closing in and whether a rival is cutting us off
 //	JEV_BOARD_STATE      draw the board into the inference state (default on;
 //	                     without it the model sees only the scorer's numbers
 //	                     and loses roughly four duels in ten to the plain bot)
@@ -56,6 +58,7 @@ func run() error {
 	cfg.Margin = time.Duration(envInt("JEV_MARGIN_MS", 120)) * time.Millisecond
 	cfg.AlwaysAsk = envBool("JEV_ALWAYS_ASK", false)
 	cfg.BoardInState = envBool("JEV_BOARD_STATE", true)
+	cfg.Advisors = envBool("JEV_ADVISORS", false)
 
 	var (
 		asker  jev.Asker
@@ -67,6 +70,7 @@ func run() error {
 		log.Info("inference enabled",
 			"model", jev.DefaultModel, "tiebreak", cfg.TieBreak,
 			"always_ask", cfg.AlwaysAsk, "board_state", cfg.BoardInState,
+			"advisors", cfg.Advisors,
 			"margin", cfg.Margin)
 
 		// Pay the TLS handshake before any game arrives. A cold connect costs

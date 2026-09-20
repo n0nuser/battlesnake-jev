@@ -1,0 +1,94 @@
+# Benchmark log
+
+What has actually been measured, including the results that did not go the way
+we hoped. Every number here came from a run; nothing is projected.
+
+All matches: 11x11 standard rules, run by the official
+`BattlesnakeOfficial/rules` CLI against local servers, with `-t 2000` so the
+inference round trip is not a handicap. `jev` and `det` are the **same binary**;
+`det` runs with `TYPESAFE_API_KEY` unset, so it plays purely deterministically.
+
+Reproduce any of these with `make tournament GAMES=20 MODE=duel LABEL=whatever`.
+
+## The headline so far
+
+| Question | Answer | Evidence |
+| --- | --- | --- |
+| Does the model beat the same code without it? | Not established | see the duel table below |
+| Does it fit a real turn budget? | Yes | 0 turns over 500ms across ~2000 logged turns; max 382ms |
+| Can it see the board? | It must | 1-9 without, 5-5 with, same 10 seeds |
+
+## Latency, measured against the live API
+
+| Condition | Latency |
+| --- | --- |
+| Cold connect, TLS handshake | 640-735 ms |
+| Warm, connection reused, 484 input tokens | 253 / 300 / 328 ms (min / p50 / p90) |
+| Warm, connection reused, 395 input tokens | 265 / 300 / 383 ms |
+
+Two consequences the design is built around. The pool must stay warm, because a
+cold connect costs more than an entire 500ms turn. And payload size barely
+moves latency, so keeping the token count down is a cost and answer-quality
+lever, not a speed one.
+
+## Showing the model the board
+
+The single largest effect found so far. Before this change the model received
+only the scorer's own per-option numbers and a six-field digest, so it was
+re-ranking values the code had computed from information the model did not
+have. Drawing the board as ASCII costs about forty tokens a call.
+
+Always-ask mode, identical 10 seeds, only the board differs:
+
+| Model sees | Jev | Deterministic |
+| --- | --- | --- |
+| Labels only | 1 | 9 |
+| Labels + board | 5 | 5 |
+
+The override rate was 28% in both, so the model is not overruling the code more
+often with the board, it is overruling it better.
+
+## Always-ask is not the way to play
+
+Consulting the model on every turn loses to the plain bot and costs about five
+times the tokens. It exists as a measurement mode, not a playing mode.
+
+| Mode | Jev | Deterministic | Games |
+| --- | --- | --- | --- |
+| Always ask, no board | 1 | 9 | 10 |
+| Always ask, with board | 5 | 5 | 10 |
+
+## Duels, selective mode
+
+_(filled in by the current run)_
+
+## Things that did not work
+
+**A bigger board does not stop the opening collisions.** Four snakes on 19x19,
+same seeds as 11x11: first death at turn 12 against turn 8. The opening deaths
+come from every snake being the same length and converging on the same food, so
+every head-to-head is a mutual kill. It is a standoff, not a crowding problem.
+
+**Penalising ties harder, and ranking fatal squares by how many rivals contest
+them, are both principled - and neither shifted the first-death turn beyond
+noise at n=6.** Both are kept because the reasoning is sound and the cost is
+zero, not because the measurement backed them.
+
+| Seed | Baseline | Harder tie penalty | + contester ranking |
+| --- | --- | --- | --- |
+| 7001 | 20 | 20 | 20 |
+| 7002 | 8 | 8 | 8 |
+| 7003 | 66 | 66 | 31 |
+| 7004 | 24 | 59 | 24 |
+| 7005 | 9 | 9 | 58 |
+| 7006 | 8 | 8 | 8 |
+
+## Spend
+
+Input tokens at $0.042 per million; output is free.
+
+| Batch | Tokens | Cost |
+| --- | --- | --- |
+| Exploration and A/B runs up to 02:30 | ~8.2M | $0.345 |
+
+Running total for the overnight session is updated as batches complete.
