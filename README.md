@@ -31,6 +31,50 @@ against 29-23-8 for two identical bots. A difference of -2.6 points, z = -0.34.
 2-18. Committing to *a* direction is most of what breaking a tie is for, and the
 scorer's arbitrary-but-consistent preference already captured nearly all of it.
 
+## What it does, and what it does not
+
+Stated plainly, because several of these would otherwise be a surprise.
+
+**What it does.** Every turn it finds the moves that are collision-safe, then
+scores each one on: reachable space by flood fill, whether its own tail is still
+reachable from there, the head-to-head outcome against every rival that could
+enter the same square and how many of them could, whether the square is a
+hazard, and how far the nearest food is. It never returns an unsafe move and
+never returns late. Optionally it asks the model to break genuinely close calls
+and, in the background, to pick a posture.
+
+**It does not search.** This is the big one. The snake reasons about the square
+it is about to enter, one move ahead — that is the whole horizon. A trap being
+set two or three moves out is invisible to it. Strong competitive snakes run
+multi-ply search; this does not, and no amount of model judgment substitutes for
+that.
+
+**It does not model opponents.** It assumes a rival may enter any square next to
+its head, and weighs that. It does not predict which square a rival will choose,
+or notice that one is deliberately cutting it off. Asking the model to spot that
+was tried and measured: the signal was not usable (-0.085 correlation).
+
+**It does not learn.** The scoring weights are hand-tuned constants. Nothing
+adapts during a game or between games.
+
+**Only the standard ruleset is implemented.** `ruleset.name` and `map` are
+logged and never branched on, so royale, constrictor, wrapped and squad games
+are played with standard logic. Wrapped boards in particular would be played
+*wrong*: leaving the board is always treated as fatal, so it would refuse the
+wrap-around moves that ruleset depends on.
+
+**Hazards are a flat penalty, not a health calculation.** A hazard square costs
+a fixed deduction. `hazardDamagePerTurn` is never read, so a mild hazard and a
+lethal one are scored identically. `foodSpawnChance` and `minimumFood` are
+likewise ignored.
+
+**Food is distance-only.** It knows how far food is, not whether a rival gets
+there first.
+
+**The model does not make it stronger.** Over 200 games the difference was not
+detectable. It is there because the question was worth answering, and the answer
+is written down rather than assumed.
+
 ## The constraint that shaped everything
 
 A Battlesnake has **500ms per turn, and that budget includes the round trip**
