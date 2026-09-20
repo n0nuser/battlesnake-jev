@@ -75,16 +75,24 @@ the request — see the benchmark.
 Duels against the **same binary** with `TYPESAFE_API_KEY` unset, so the only
 difference is whether the model is consulted at all.
 
-| Who breaks the close calls | Wins | Losses | Draws | Cost |
-| --- | --- | --- | --- | --- |
-| A coin | 2 | 18 | 0 | $0.00 |
-| The code's own fixed direction ordering | 8 | 10 | 2 | $0.00 |
-| The model | 9 | 10 | 1 | $0.02 |
+| Who breaks the close calls | Games | Result | Share of decisive |
+| --- | --- | --- | --- |
+| The model | 200 | 101-89-10 | 53.2% |
+| Two identical bots — the floor | 60 | 29-23-8 | 55.8% |
+| A coin | 20 | 2-18-0 | 10% |
 
-The model is far better than chance and level with a fixed direction preference.
-Committing to *a* direction turns out to be most of what breaking a tie is for:
-a snake that chooses randomly between two equally-scored moves wanders, and
-wandering fills in its own escape routes.
+Consulting the model for close calls neither helps nor hurts by any amount two
+hundred games can detect: **-2.6 percentage points against the floor, z = -0.34**.
+It is also nowhere near random — a coin on the same decisions loses 2-18.
+
+Committing to *a* direction turns out to be most of what breaking a tie is for.
+A snake that chooses randomly between two equally-scored moves wanders, and
+wandering fills in its own escape routes. The scorer's arbitrary-but-consistent
+preference already captures nearly all of that value, which leaves the model
+very little room above it.
+
+Across those 200 games the model was called 5,111 times and **missed the turn
+deadline once**, covered by the deterministic move already in hand. Cost: $0.12.
 
 Showing the model the board is what separates it from being actively harmful:
 

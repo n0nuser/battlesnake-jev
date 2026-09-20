@@ -138,6 +138,30 @@ Next: `hunted` is dropped, and confinement is asked as a Score - a degree along
 a described dimension, which is what the primitive is for - and consumed as a
 continuous weight rather than a threshold.
 
+## The headline, at n=200
+
+The one comparison run with enough games to mean something. Two hundred duels,
+seeds 9101-9300, default configuration, against the same binary with the API
+key unset.
+
+| | Result | Share of decisive games |
+| --- | --- | --- |
+| The model breaking close calls (n=200) | 101-89-10 | 53.2% |
+| Two identical bots, the floor (n=60) | 29-23-8 | 55.8% |
+
+Difference: **-2.6 percentage points, z = -0.34.** The 95% confidence interval
+on the model arm runs from 46.1% to 60.3%, which contains the floor
+comfortably. On this task, consulting the model for close calls neither helps
+nor hurts to any degree these two hundred games can detect.
+
+It cost $0.1165 for the two hundred games, made 5,111 calls, overrode the
+scorer on 571 of them, and **missed the turn deadline once** - one miss in
+5,111 calls, covered by the deterministic move already in hand.
+
+What still holds from the smaller runs is the floor: a coin loses 2-18. The
+model is nowhere near random. It simply lands in the same place a fixed
+direction preference already does.
+
 ## The measurement was too noisy to support any of it
 
 Two runs of the **same configuration** on different seed blocks:
