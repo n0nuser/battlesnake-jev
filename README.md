@@ -5,9 +5,31 @@ are deterministic code and the judgment calls go to
 [TypeSafe's Jev](https://docs.typesafe.ai) — a System One model that returns
 typed answers and probabilities instead of text.
 
-The interesting part of this repository is not that a model plays a game. It is
-that the whole thing is measured, including the parts that did not work.
-[BENCHMARK.md](BENCHMARK.md) has the numbers.
+The interesting part is not that a model plays a game. It is that the question
+*"did the model actually help?"* was answered with controls instead of vibes,
+and the answer was mostly no. [BENCHMARK.md](BENCHMARK.md) has the workings.
+
+![One model snake against three deterministic bots](docs/1v3.gif)
+
+Purple is the snake that can consult the model. The other three are the same
+binary with the API key unset. The panel names which of the two decided each
+move and why — most turns the code decides alone and spends nothing.
+
+## Three results worth the read
+
+**Showing the model the board is the whole ballgame.** Given only the numbers
+the scorer had already computed, it lost 1-9 against the plain bot. Given about
+forty extra tokens of the board drawn as text, the same model on the same seeds
+went 5-5.
+
+![What the model actually sees](docs/what-the-model-sees.gif)
+
+**Over 200 games, consulting the model changed nothing measurable.** 101-89-10,
+against 29-23-8 for two identical bots. A difference of -2.6 points, z = -0.34.
+
+**But it is nowhere near random.** Handing the same decisions to a coin loses
+2-18. Committing to *a* direction is most of what breaking a tie is for, and the
+scorer's arbitrary-but-consistent preference already captured nearly all of it.
 
 ## The constraint that shaped everything
 
@@ -70,10 +92,11 @@ dropped in favour of a digest, plus the board drawn as text:
 That board costs about forty tokens and it is the single most valuable thing in
 the request — see the benchmark.
 
-## Results in brief
+## The numbers
 
 Duels against the **same binary** with `TYPESAFE_API_KEY` unset, so the only
-difference is whether the model is consulted at all.
+difference is whether the model is consulted at all. Reproduce any row with
+`make tournament`.
 
 | Who breaks the close calls | Games | Result | Share of decisive |
 | --- | --- | --- | --- |
@@ -94,12 +117,19 @@ very little room above it.
 Across those 200 games the model was called 5,111 times and **missed the turn
 deadline once**, covered by the deterministic move already in hand. Cost: $0.12.
 
-Showing the model the board is what separates it from being actively harmful:
+Showing the model the board is what separates it from being actively harmful.
+Ten games per arm, so read the direction rather than the margin:
 
 | Model sees | Wins | Losses |
 | --- | --- | --- |
 | The scorer's numbers only | 1 | 9 |
 | The scorer's numbers and the board | 5 | 5 |
+
+Things that did **not** work are still here behind flags, along with the
+correlations that killed them: advisory noul questions about being sealed in
+(-0.278 against measured space) and being hunted (-0.085, noise), and asking
+which move becomes a trap later, which made play worse. See
+[BENCHMARK.md](BENCHMARK.md).
 
 ## Running it
 
