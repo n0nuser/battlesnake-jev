@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -32,6 +33,10 @@ type Config struct {
 	// model only sees the numbers the scorer already computed, and can only
 	// re-rank them; with it, it sees the shape those numbers flatten away.
 	BoardInState bool
+	// RandomTieBreak is a control arm, not a way to play: it breaks ties with a
+	// coin instead of asking the model. Without it there is no way to tell a
+	// model that is contributing from one that is no better than chance.
+	RandomTieBreak bool
 	// Avoid asks which of the safe moves leads to trouble a few moves later.
 	// The scorer is one-ply, so a trap that closes in three moves and a merely
 	// tight corridor look identical to it; that is the gap worth asking about.
@@ -101,6 +106,8 @@ const (
 	ReasonJev Reason = "jev"
 	// ReasonJevFailed means inference was asked but the fallback was used.
 	ReasonJevFailed Reason = "jev-failed"
+	// ReasonRandom means the control arm broke the tie with a coin.
+	ReasonRandom Reason = "random"
 	// ReasonJevAvoid means the model struck a move off as a trap and the best
 	// of what remained was played.
 	ReasonJevAvoid Reason = "jev-avoid"
@@ -259,6 +266,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 	d.maybeRefreshMode(req, gs)
 
 	if len(safe) == 0 {
+		gs.noteReason(ReasonTrapped)
 		return Decision{Move: d.leastBad(grid, req).String(), Reason: ReasonTrapped, Mode: mode}
 	}
 
@@ -267,6 +275,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 	best := cands[0]
 
 	decide := func(r Reason) Decision {
+		gs.noteReason(r)
 		return Decision{Move: best.Dir.String(), Reason: r, Mode: mode, Candidates: cands}
 	}
 
@@ -283,6 +292,14 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 	// Inference is worth paying for only when the options genuinely trade off.
 	if !d.cfg.AlwaysAsk && features(cands[0]) == features(cands[1]) {
 		return decide(ReasonInterchangeable)
+	}
+	if d.cfg.RandomTieBreak {
+		pick := cands[rand.IntN(len(cands))]
+		if pick.Dir != best.Dir {
+			gs.overrides.Add(1)
+		}
+		gs.noteReason(ReasonRandom)
+		return Decision{Move: pick.Dir.String(), Reason: ReasonRandom, Mode: mode, Candidates: cands}
 	}
 	if !d.cfg.TieBreak || d.asker == nil {
 		return decide(ReasonTieBreakDisabled)
@@ -326,6 +343,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 				if kept[0].Dir != best.Dir {
 					gs.overrides.Add(1)
 				}
+				gs.noteReason(ReasonJevAvoid)
 				return Decision{
 					Move:       kept[0].Dir.String(),
 					Reason:     ReasonJevAvoid,
@@ -357,6 +375,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 		if rescored[0].Dir != best.Dir {
 			gs.overrides.Add(1)
 		}
+		gs.noteReason(ReasonJevAlarm)
 		return Decision{
 			Move:       rescored[0].Dir.String(),
 			Reason:     ReasonJevAlarm,
@@ -387,6 +406,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 		gs.overrides.Add(1)
 	}
 
+	gs.noteReason(ReasonJev)
 	return Decision{
 		Move:       chosen.Dir.String(),
 		Reason:     ReasonJev,

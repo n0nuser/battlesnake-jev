@@ -682,3 +682,49 @@ func TestStandoffPrefersTheLeastContestedSquare(t *testing.T) {
 			got.Move, c.Contesters)
 	}
 }
+
+// TestRandomTieBreakIsAControlNotAWayToPlay: the control arm must still only
+// ever return a safe move, so the comparison against the model is fair.
+func TestRandomTieBreakStaysInTheSafeSet(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RandomTieBreak = true
+	fake := newFake("left")
+	d := NewDecider(fake, cfg, quietLogger())
+
+	legal := map[string]bool{"up": true, "down": true, "left": true, "right": true}
+	seen := map[string]bool{}
+	for range 40 {
+		got := d.Decide(withDeadline(t, 500*time.Millisecond), tradeOffRequest(), newGameState("g1"))
+		if got.Reason != ReasonRandom {
+			t.Fatalf("Reason = %q, want %q", got.Reason, ReasonRandom)
+		}
+		if !legal[got.Move] {
+			t.Fatalf("Move = %q, which is not legal", got.Move)
+		}
+		seen[got.Move] = true
+	}
+	if len(seen) < 2 {
+		t.Errorf("forty draws produced only %d distinct move(s): the control is not random", len(seen))
+	}
+	if n := fake.count("move"); n != 0 {
+		t.Errorf("the control arm made %d inference calls, want 0", n)
+	}
+}
+
+func TestReasonsAreCounted(t *testing.T) {
+	gs := newGameState("g1")
+	d := NewDecider(nil, DefaultConfig(), quietLogger())
+
+	// Head at (0,0) with the body to the right: only "up" is safe.
+	req := request([]api.Battlesnake{
+		snake("me", 90, coord(0, 0), coord(1, 0), coord(2, 0)),
+	}, nil)
+	for range 3 {
+		d.Decide(withDeadline(t, 500*time.Millisecond), req, gs)
+	}
+
+	got := gs.Reasons()
+	if got != "only-move=3" {
+		t.Errorf("Reasons() = %q, want %q", got, "only-move=3")
+	}
+}

@@ -8,6 +8,8 @@
 //	                     deterministic, which is a supported mode
 //	JEV_TIEBREAK         set to "false" to keep inference to the background
 //	                     posture only, the documented degraded mode
+//	JEV_RANDOM_TIEBREAK  control arm: break ties with a coin instead of asking,
+//	                     so the model can be compared against chance
 //	JEV_AVOID            also ask which safe move turns into a trap a few moves
 //	                     later, and strike that move off
 //	JEV_ADVISORS         also ask, in the same request, whether the position is
@@ -62,6 +64,7 @@ func run() error {
 	cfg.BoardInState = envBool("JEV_BOARD_STATE", true)
 	cfg.Advisors = envBool("JEV_ADVISORS", false)
 	cfg.Avoid = envBool("JEV_AVOID", false)
+	cfg.RandomTieBreak = envBool("JEV_RANDOM_TIEBREAK", false)
 
 	var (
 		asker  jev.Asker

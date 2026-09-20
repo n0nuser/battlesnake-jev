@@ -130,7 +130,7 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 			"alive", isAlive(req),
 			"inference_calls", calls, "input_tokens", tokens,
 			"fallbacks", fallbacks, "overrides", overrides,
-			"final_mode", gs.Mode())
+			"reasons", gs.Reasons(), "final_mode", gs.Mode())
 	}
 	w.WriteHeader(http.StatusOK)
 }

@@ -8,6 +8,9 @@ package strategy
 
 import (
 	"context"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +69,9 @@ type GameState struct {
 	inputTokens atomic.Int64
 	fallbacks   atomic.Int64
 	overrides   atomic.Int64
+
+	reasonsMu sync.Mutex
+	reasons   map[Reason]int
 }
 
 // situation is the coarse fingerprint used to decide whether the posture is
@@ -79,7 +85,7 @@ type situation struct {
 }
 
 func newGameState(id string) *GameState {
-	gs := &GameState{ID: id, lastRefresh: -minRefreshGap}
+	gs := &GameState{ID: id, lastRefresh: -minRefreshGap, reasons: map[Reason]int{}}
 	gs.mode.Store(ModeSurvive)
 	gs.latencyNanos.Store(int64(seedLatency))
 	return gs
@@ -103,6 +109,31 @@ func (g *GameState) observeLatency(d time.Duration) {
 	const alpha = 4 // weight of 1/alpha on the new sample
 	old := g.latencyNanos.Load()
 	g.latencyNanos.Store(old + (int64(d)-old)/alpha)
+}
+
+// noteReason records how a move was decided, so a batch of games can report
+// which paths actually ran rather than leaving it to be inferred.
+func (g *GameState) noteReason(r Reason) {
+	g.reasonsMu.Lock()
+	defer g.reasonsMu.Unlock()
+	g.reasons[r]++
+}
+
+// Reasons returns the decision-path counts as a compact "name=count" string,
+// ordered so the output is stable between runs.
+func (g *GameState) Reasons() string {
+	g.reasonsMu.Lock()
+	defer g.reasonsMu.Unlock()
+	keys := make([]string, 0, len(g.reasons))
+	for r := range g.reasons {
+		keys = append(keys, string(r))
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+strconv.Itoa(g.reasons[Reason(k)]))
+	}
+	return strings.Join(parts, ",")
 }
 
 // Stats reports what this game spent, which is the headline number for a
