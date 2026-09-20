@@ -220,6 +220,18 @@ Render dashboard → **New → Blueprint** → point it at this repo. It builds 
 natively; the [`Dockerfile`](Dockerfile) is there for anywhere that takes a
 container instead (16.9MB, distroless, non-root).
 
+If you configure the service by hand rather than from the blueprint, note that
+Render's suggested Go build command does not work here as offered:
+
+```
+go build -tags netgo -ldflags '-s -w' -o app            # fails: no Go files
+go build -tags netgo -ldflags '-s -w' -o app ./cmd/battlesnake   # correct
+```
+
+Its default builds whatever package sits at the repo root, and this module
+keeps `main` under `cmd/` per the official layout, so the root holds no Go
+files at all. The flags themselves are fine and worth keeping.
+
 **The free plan sleeps, and that will kill the snake.** A Free web service spins
 down after 15 minutes without traffic and takes about a minute to wake. If a
 game starts while it is asleep, the engine gets nothing, moves the snake `up`,

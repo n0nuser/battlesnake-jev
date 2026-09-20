@@ -16,8 +16,12 @@ services:
     runtime: go
     region: ohio
     plan: free
-    buildCommand: go build -o battlesnake ./cmd/battlesnake
-    startCommand: ./battlesnake
+    # Render's default build command omits the package path, which fails here:
+    # this module keeps its main under cmd/, so a build at the repo root finds
+    # no Go files. The flags are Render's own - netgo for the pure-Go resolver,
+    # -s -w to strip the binary.
+    buildCommand: go build -tags netgo -ldflags '-s -w' -o app ./cmd/battlesnake
+    startCommand: ./app
     healthCheckPath: /
     autoDeploy: true
     envVars:
