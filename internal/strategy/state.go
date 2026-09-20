@@ -70,6 +70,13 @@ type GameState struct {
 	fallbacks   atomic.Int64
 	overrides   atomic.Int64
 
+	// engineLatency accumulates what the game engine reports our round trip to
+	// be. It is the only measurement of the network path taken from the side
+	// that matters, and it is what says whether a deploy is close enough.
+	engineLatencySum   atomic.Int64
+	engineLatencyCount atomic.Int64
+	engineLatencyMax   atomic.Int64
+
 	reasonsMu sync.Mutex
 	reasons   map[Reason]int
 }
@@ -134,6 +141,32 @@ func (g *GameState) Reasons() string {
 		parts = append(parts, k+"="+strconv.Itoa(g.reasons[Reason(k)]))
 	}
 	return strings.Join(parts, ",")
+}
+
+// NoteEngineLatency records the round trip the engine measured for our last
+// reply, as reported on the snake in each request.
+func (g *GameState) NoteEngineLatency(ms int64) {
+	if ms <= 0 {
+		return
+	}
+	g.engineLatencySum.Add(ms)
+	g.engineLatencyCount.Add(1)
+	for {
+		cur := g.engineLatencyMax.Load()
+		if ms <= cur || g.engineLatencyMax.CompareAndSwap(cur, ms) {
+			break
+		}
+	}
+}
+
+// EngineLatency returns the mean and worst round trip the engine saw, in
+// milliseconds. A zero count means the engine never reported one.
+func (g *GameState) EngineLatency() (mean, max int64) {
+	n := g.engineLatencyCount.Load()
+	if n == 0 {
+		return 0, 0
+	}
+	return g.engineLatencySum.Load() / n, g.engineLatencyMax.Load()
 }
 
 // Stats reports what this game spent, which is the headline number for a

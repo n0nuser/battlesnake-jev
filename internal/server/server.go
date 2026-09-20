@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/n0nuser/battlesnake-jev/internal/api"
@@ -97,6 +98,12 @@ func (h *Handler) handleMove(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	gs := h.store.Get(stateKey(req))
+	// The engine reports the round trip it measured for our previous reply.
+	// That is the number the turn budget is actually spent on, and the only
+	// one we cannot measure from in here.
+	if ms, err := strconv.ParseInt(req.You.Latency, 10, 64); err == nil {
+		gs.NoteEngineLatency(ms)
+	}
 	decision := h.decider.Decide(ctx, req, gs)
 
 	// The shout renders on the game board, so it is where a spectator can see
@@ -125,12 +132,15 @@ func (h *Handler) handleEnd(w http.ResponseWriter, r *http.Request) {
 	gs := h.store.End(stateKey(req))
 	if gs != nil {
 		calls, tokens, fallbacks, overrides := gs.Stats()
+		meanRTT, maxRTT := gs.EngineLatency()
 		h.log.Info("game ended",
 			"game", req.Game.ID, "turns", req.Turn,
 			"alive", isAlive(req),
 			"inference_calls", calls, "input_tokens", tokens,
 			"fallbacks", fallbacks, "overrides", overrides,
-			"reasons", gs.Reasons(), "final_mode", gs.Mode())
+			"reasons", gs.Reasons(),
+			"engine_rtt_mean_ms", meanRTT, "engine_rtt_max_ms", maxRTT,
+			"final_mode", gs.Mode())
 	}
 	w.WriteHeader(http.StatusOK)
 }

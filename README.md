@@ -210,6 +210,43 @@ is measured against.
 | `JEV_RANDOM_TIEBREAK` | off | Control arm: break ties with a coin |
 | `JEV_MARGIN_MS` | 120 | Slack held back from the turn budget |
 
+## Deploying it
+
+A laptop on wifi is the weak link: the tunnel dies with the terminal and the
+round trip is whatever the house wifi is doing. [`render.yaml`](render.yaml) is
+a Render blueprint for the deterministic snake.
+
+Render dashboard → **New → Blueprint** → point it at this repo. It builds Go
+natively; the [`Dockerfile`](Dockerfile) is there for anywhere that takes a
+container instead (16.9MB, distroless, non-root).
+
+**The free plan sleeps, and that will kill the snake.** A Free web service spins
+down after 15 minutes without traffic and takes about a minute to wake. If a
+game starts while it is asleep, the engine gets nothing, moves the snake `up`,
+and it dies before the service is even running. Two ways round it:
+
+- Point an uptime pinger at `/` every 10 minutes. One always-on service is about
+  730 hours a month against the 750 free instance hours, so it fits — just.
+- Or set `plan` to the cheapest paid instance type, `0.5c-512mb`, which stays
+  awake. Check Render's pricing page for the current cost.
+
+**Pick the region by measuring, not guessing.** The blueprint uses `ohio`
+because the game engine resolves to Google Cloud near us-central, but that is
+inference. Every game logs the round trip *the engine itself measured*:
+
+```
+msg="game ended" turns=44 ... engine_rtt_mean_ms=112 engine_rtt_max_ms=180
+```
+
+That number is the one the 500ms budget is actually spent on, and it is the
+only one that cannot be measured from inside the server. If it looks high, move
+the service to `virginia` or `oregon` and compare.
+
+**The deployed snake is the deterministic one.** `TYPESAFE_API_KEY` is
+deliberately absent from the blueprint, so public traffic cannot spend anything.
+Adding it in the Render dashboard switches inference on — though by the
+measurements above, it will not change how it plays.
+
 ## Layout
 
 Per the [official Go guidance](https://go.dev/doc/modules/layout) for a server:

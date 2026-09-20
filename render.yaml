@@ -1,0 +1,32 @@
+# Render Blueprint. Deploy with: New > Blueprint, point it at this repo.
+#
+# Region: the game engine runs on Google Cloud and resolves near us-central,
+# so Ohio is the closest Render region. Verify rather than trust it - every
+# game logs `engine_rtt_mean_ms`, which is the round trip the engine itself
+# measured. If that is high, move the service to `virginia` or `oregon` and
+# compare.
+#
+# Plan: `free` spins down after 15 minutes without traffic and takes about a
+# minute to wake. A Battlesnake that is asleep when a game starts returns
+# nothing, the engine moves it `up`, and it usually dies - so free is fine for
+# a demo and wrong for a leaderboard. See README for the two ways round that.
+services:
+  - name: battlesnake-jev
+    type: web
+    runtime: go
+    region: ohio
+    plan: free
+    buildCommand: go build -o battlesnake ./cmd/battlesnake
+    startCommand: ./battlesnake
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: LOG_LEVEL
+        value: info
+      - key: SNAKE_AUTHOR
+        value: n0nuser
+      - key: SNAKE_VERSION
+        value: render-1.0
+      # TYPESAFE_API_KEY is deliberately absent: the deployed snake is the
+      # deterministic one, so public traffic cannot spend anything. Adding it
+      # in the Render dashboard is all it takes to switch inference on.

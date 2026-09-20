@@ -277,3 +277,56 @@ func TestSnakesInTheSameGameKeepSeparateState(t *testing.T) {
 		t.Errorf("tracked states = %d, want 2: snakes in one game must not share state", store.Len())
 	}
 }
+
+// TestEngineReportedLatencyIsRecorded: the engine tells us the round trip it
+// measured for our previous reply, and that is the number a deploy decision
+// rests on, so it must not be silently dropped.
+func TestEngineReportedLatencyIsRecorded(t *testing.T) {
+	store := strategy.NewStore(time.Hour)
+	log := quietLogger()
+	h := New(api.InfoResponse{APIVersion: "1"}, store,
+		strategy.NewDecider(nil, strategy.DefaultConfig(), log), nil, log)
+	srv := httptest.NewServer(h.Routes())
+	defer srv.Close()
+
+	for _, latency := range []string{"111", "250", "90"} {
+		body := strings.ReplaceAll(exampleMoveRequest, `"latency": "111", "head": {"x": 0, "y": 0}`,
+			`"latency": "`+latency+`", "head": {"x": 0, "y": 0}`)
+		resp, err := http.Post(srv.URL+"/move", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST /move: %v", err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	gs := store.Get("totally-unique-game-id/snake-508e96ac-94ad-11ea-bb37")
+	mean, max := gs.EngineLatency()
+	if mean == 0 || max == 0 {
+		t.Fatalf("EngineLatency() = (%d, %d), want the reported values recorded", mean, max)
+	}
+	if max != 250 {
+		t.Errorf("max = %d, want 250", max)
+	}
+}
+
+func TestUnparseableLatencyIsIgnored(t *testing.T) {
+	store := strategy.NewStore(time.Hour)
+	log := quietLogger()
+	h := New(api.InfoResponse{APIVersion: "1"}, store,
+		strategy.NewDecider(nil, strategy.DefaultConfig(), log), nil, log)
+	srv := httptest.NewServer(h.Routes())
+	defer srv.Close()
+
+	// The first turn of a game carries an empty latency; it must not count.
+	body := strings.ReplaceAll(exampleMoveRequest, `"latency": "111"`, `"latency": ""`)
+	resp, err := http.Post(srv.URL+"/move", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /move: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	gs := store.Get("totally-unique-game-id/snake-508e96ac-94ad-11ea-bb37")
+	if mean, max := gs.EngineLatency(); mean != 0 || max != 0 {
+		t.Errorf("EngineLatency() = (%d, %d), want (0, 0) when nothing was reported", mean, max)
+	}
+}
