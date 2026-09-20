@@ -138,6 +138,30 @@ Next: `hunted` is dropped, and confinement is asked as a Score - a degree along
 a described dimension, which is what the primitive is for - and consumed as a
 continuous weight rather than a threshold.
 
+## The measurement was too noisy to support any of it
+
+Two runs of the **same configuration** on different seed blocks:
+
+| Arm | Seeds | Result |
+| --- | --- | --- |
+| Code's fixed ordering | 9001-9020 | 8-10-2 |
+| Code's fixed ordering | 9021-9060 | 25-9-6 |
+
+Same binary, same flags, same opponent. One block loses, the other wins better
+than two to one. A difference of two or three games at n=20 - which is what
+every comparison above rests on - is well inside that.
+
+So the arm-by-arm readings above are not safe to draw conclusions from, and the
+honest summary of the duel work is that it did not have the statistical power to
+separate any of these configurations. What survives is the coin: losing 2-18 is
+far outside this range, so "the model beats chance" holds.
+
+The likely culprit is a control that was never run. Both snakes in a duel are
+the same bot, so whichever *starting position* is better may simply win, and
+every result gets measured against a 50/50 assumption that was never checked.
+The `position-bias` run puts two identical deterministic bots on the same sixty
+seeds to find out what the floor actually is.
+
 ## Things that did not work
 
 **A bigger board does not stop the opening collisions.** Four snakes on 19x19,
