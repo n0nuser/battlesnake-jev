@@ -112,7 +112,7 @@ func (h *Handler) handleMove(w http.ResponseWriter, r *http.Request) {
 		"reason", decision.Reason, "mode", decision.Mode,
 		"health", req.You.Health, "length", req.You.Length,
 		"tokens", decision.Tokens,
-		"sealed", decision.Advice.Sealed, "hunted", decision.Advice.Hunted,
+		"room", decision.Advice.Room, "confinement", decision.Advice.Confinement(),
 		"space", space, "tailsafe", tailSafe,
 		"took", time.Since(start))
 }

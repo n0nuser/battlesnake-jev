@@ -60,12 +60,12 @@ func TestBoardInStateIsOptIn(t *testing.T) {
 		{Dir: 1, Space: 18, FoodDist: 7, HasFood: true, TailSafe: true},
 	}
 
-	off := tieBreakRequest(req, ModeSurvive, cands, false, false).State.(map[string]any)
+	off := tieBreakRequest(req, ModeSurvive, cands, false, false, false).State.(map[string]any)
 	if _, present := off["board"]; present {
 		t.Error("board was sent although it was not enabled")
 	}
 
-	on := tieBreakRequest(req, ModeSurvive, cands, true, false).State.(map[string]any)
+	on := tieBreakRequest(req, ModeSurvive, cands, true, false, false).State.(map[string]any)
 	board, present := on["board"].(string)
 	if !present {
 		t.Fatal("board was not sent although it was enabled")

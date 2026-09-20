@@ -21,6 +21,8 @@ func (d Decision) Shout() string {
 	switch d.Reason {
 	case ReasonJev:
 		fmt.Fprintf(&b, "jev %s (%.0f%%)", d.Move, d.Confidence*100)
+	case ReasonJevAvoid:
+		fmt.Fprintf(&b, "jev: not %s (%.0f%%), going %s", d.Avoided, d.Confidence*100, d.Move)
 	case ReasonJevAlarm:
 		fmt.Fprintf(&b, "jev: %s, playing %s safe", alarmWord(d.Advice), d.Move)
 	case ReasonJevFailed:
@@ -65,22 +67,15 @@ func (d Decision) Shout() string {
 	return out
 }
 
-// alarmWord names which warning fired, for the board.
+// alarmWord describes how tight the model reads the position, for the board.
 func alarmWord(a Advice) string {
-	if a.Hunted >= a.Sealed {
-		return fmt.Sprintf("being cut off (%.0f%%)", a.Hunted*100)
-	}
-	return fmt.Sprintf("space closing (%.0f%%)", a.Sealed*100)
+	return fmt.Sprintf("room %.0f%% gone", a.Confinement()*100)
 }
 
-// strongestWarning reports a warning worth showing even when it did not fire.
+// strongestWarning reports a reading worth showing even when it did not fire.
 func strongestWarning(a Advice) string {
-	switch {
-	case a.Sealed >= 0.35 && a.Sealed >= a.Hunted:
-		return fmt.Sprintf("closing %.0f%%", a.Sealed*100)
-	case a.Hunted >= 0.35:
-		return fmt.Sprintf("hunted %.0f%%", a.Hunted*100)
-	default:
-		return ""
+	if c := a.Confinement(); c >= 0.35 {
+		return fmt.Sprintf("room %.0f%% gone", c*100)
 	}
+	return ""
 }

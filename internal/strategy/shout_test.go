@@ -7,6 +7,18 @@ import (
 	"github.com/n0nuser/battlesnake-jev/internal/game"
 )
 
+func TestShoutShowsTheRoomReading(t *testing.T) {
+	d := Decision{
+		Move: "up", Reason: ReasonJevAlarm, Mode: ModeSurvive,
+		Advice:     Advice{Present: true, Room: 1},
+		Candidates: []Candidate{{Dir: game.Up, Space: 12, TailSafe: true}},
+	}
+	got := d.Shout()
+	if !strings.Contains(got, "room 75% gone") {
+		t.Errorf("Shout() = %q, want it to report the room reading", got)
+	}
+}
+
 func TestShoutNamesWhoDecided(t *testing.T) {
 	tests := []struct {
 		name     string

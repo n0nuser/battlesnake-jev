@@ -24,7 +24,9 @@ type fakeAsker struct {
 	err     error
 	latency time.Duration
 	block   chan struct{}
-	nouls   map[string]float64
+	scores  map[string]float64
+	choices map[string]string
+	conf    map[string]float64
 }
 
 func newFake(answer string) *fakeAsker {
@@ -51,16 +53,27 @@ func (f *fakeAsker) Ask(ctx context.Context, req jev.Request) (*jev.Response, er
 	}
 
 	f.mu.Lock()
-	nouls := f.nouls
+	scores, choices, conf := f.scores, f.choices, f.conf
 	f.mu.Unlock()
 
 	answers := make(map[string]jev.Answer, len(req.Questions))
 	for id, q := range req.Questions {
-		if q.Type == jev.TypeNoul {
-			answers[id] = jev.Answer{Type: jev.TypeNoul, Noul: nouls[id]}
+		if q.Type == jev.TypeScore {
+			v, ok := scores[id]
+			if !ok {
+				continue // a question the fake was not told how to answer
+			}
+			answers[id] = jev.Answer{Type: jev.TypeScore, Score: v, Confidence: 0.8}
 			continue
 		}
-		answers[id] = jev.Answer{Type: jev.TypeChoice, Choice: answer, Confidence: 0.9}
+		pick, confidence := answer, 0.9
+		if c, ok := choices[id]; ok {
+			pick = c
+		}
+		if c, ok := conf[id]; ok {
+			confidence = c
+		}
+		answers[id] = jev.Answer{Type: jev.TypeChoice, Choice: pick, Confidence: confidence}
 	}
 	return &jev.Response{
 		Model:   "jev-test",
@@ -105,6 +118,18 @@ func tradeOffRequest() api.GameRequest {
 	return request([]api.Battlesnake{
 		snake("me", 90, coord(5, 5), coord(5, 4), coord(5, 3)),
 	}, []api.Coord{coord(3, 5)})
+}
+
+// splitBoardRequest puts our body across row y=3 from the left edge, so "up"
+// opens into 77 squares and "down" into 33, with our head the only square
+// joining them. The scorer prefers up.
+func splitBoardRequest() api.GameRequest {
+	body := []api.Coord{coord(0, 3)}
+	for x := 1; x <= 10; x++ {
+		body = append(body, coord(x, 3))
+	}
+	me := api.Battlesnake{ID: "me", Health: 100, Body: body, Head: body[0], Length: len(body)}
+	return request([]api.Battlesnake{me}, nil)
 }
 
 // withDeadline mirrors what the handler does with game.timeout.
@@ -361,7 +386,7 @@ func TestTieBreakRequestSendsOnlySafeMovesAndNoIdentifiers(t *testing.T) {
 		{Dir: game.Right, Space: 18, FoodDist: 7, HasFood: true, H2H: game.H2HLose},
 	}
 
-	got := tieBreakRequest(req, ModeSurvive, cands, false, false)
+	got := tieBreakRequest(req, ModeSurvive, cands, false, false, false)
 
 	criteria, ok := got.Questions["move"].Criteria.(map[string]string)
 	if !ok {

@@ -32,6 +32,13 @@ type Config struct {
 	// model only sees the numbers the scorer already computed, and can only
 	// re-rank them; with it, it sees the shape those numbers flatten away.
 	BoardInState bool
+	// Avoid asks which of the safe moves leads to trouble a few moves later.
+	// The scorer is one-ply, so a trap that closes in three moves and a merely
+	// tight corridor look identical to it; that is the gap worth asking about.
+	Avoid bool
+	// AvoidConfidence is how concentrated the warning must be before a move is
+	// struck off the list.
+	AvoidConfidence float64
 	// Advisors asks, in the same request as the move, whether the position is
 	// closing in and whether a rival is working to cut us off. Those are
 	// judgments a one-ply scorer cannot make, and they cost almost nothing:
@@ -61,11 +68,12 @@ const (
 // DefaultConfig is tuned from the measured warm latency of the inference API.
 func DefaultConfig() Config {
 	return Config{
-		TieBreak:       true,
-		Margin:         120 * time.Millisecond,
-		CloseEnough:    0.12,
-		LowHealth:      30,
-		AlarmThreshold: 0.65,
+		TieBreak:        true,
+		Margin:          120 * time.Millisecond,
+		CloseEnough:     0.12,
+		LowHealth:       30,
+		AlarmThreshold:  0.65,
+		AvoidConfidence: 0.45,
 	}
 }
 
@@ -93,6 +101,9 @@ const (
 	ReasonJev Reason = "jev"
 	// ReasonJevFailed means inference was asked but the fallback was used.
 	ReasonJevFailed Reason = "jev-failed"
+	// ReasonJevAvoid means the model struck a move off as a trap and the best
+	// of what remained was played.
+	ReasonJevAvoid Reason = "jev-avoid"
 	// ReasonJevAlarm means the model warned that the position is closing or
 	// that a rival is cutting us off, so survival overrode the posture.
 	ReasonJevAlarm Reason = "jev-alarm"
@@ -108,6 +119,20 @@ type Decision struct {
 	Latency    time.Duration
 	Tokens     int
 	Advice     Advice
+	// Avoided is the move the model struck off, when it did.
+	Avoided string
+}
+
+// without returns the candidates other than the named direction, keeping the
+// existing order, which is already sorted by score.
+func without(cands []Candidate, dir string) []Candidate {
+	kept := make([]Candidate, 0, len(cands))
+	for _, c := range cands {
+		if c.Dir.String() != dir {
+			kept = append(kept, c)
+		}
+	}
+	return kept
 }
 
 // Chosen returns the scored candidate that was actually played, when the move
@@ -121,21 +146,47 @@ func (d Decision) Chosen() (Candidate, bool) {
 	return Candidate{}, false
 }
 
+// avoidNothing is the option that lets the model decline to warn about any of
+// the moves. Without a way to say "none of these", a choice question has to
+// name one whatever the position looks like.
+const avoidNothing = "none"
+
+// roomLevels are the described positions on the confinement scale, from worst
+// to best. A score question returns a probability-weighted position along them,
+// which suits "how much room is there" far better than a yes/no about a rare
+// future event: asked as a noul, the model hedged and the answer barely moved.
+var roomLevels = []string{
+	"Boxed in: my head sits in a pocket with one way out or none, and no route back to the open part of the board.",
+	"Tight: one narrow corridor, with my own body or a rival closing off the alternatives.",
+	"Workable: two or three routes out, though the space around me is shrinking.",
+	"Comfortable: several routes into open board and nothing closing on me.",
+	"Wide open: my head is in the large open part of the board with room in every direction.",
+}
+
 // Advice holds the model's read of the position, separate from its move.
 type Advice struct {
-	// Sealed is the probability we are about to be shut into a region we
-	// cannot leave.
-	Sealed float64
-	// Hunted is the probability a rival is manoeuvring to cut us off rather
-	// than simply chasing food.
-	Hunted float64
-	// Present reports whether the advisories were asked for at all.
+	// Room is the model's position on the confinement scale, 0 for boxed in
+	// up to len(roomLevels)-1 for wide open.
+	Room float64
+	// Confidence is how concentrated that judgment was.
+	Confidence float64
+	// Present reports whether the advisory was asked for and answered.
 	Present bool
 }
 
-// Alarmed reports whether either warning crossed the threshold.
+// Confinement maps the room scale onto 0 for wide open and 1 for boxed in, so
+// it can be used as a continuous weight rather than a threshold.
+func (a Advice) Confinement() float64 {
+	if !a.Present || len(roomLevels) < 2 {
+		return 0
+	}
+	c := 1 - a.Room/float64(len(roomLevels)-1)
+	return min(max(c, 0), 1)
+}
+
+// Alarmed reports whether the model puts us at or below the "tight" level.
 func (a Advice) Alarmed(threshold float64) bool {
-	return a.Present && (a.Sealed >= threshold || a.Hunted >= threshold)
+	return a.Present && a.Confinement() >= threshold
 }
 
 // Candidate is one scored move.
@@ -249,7 +300,7 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 	askCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
-	resp, err := d.asker.Ask(askCtx, tieBreakRequest(req, mode, cands, d.cfg.BoardInState, d.cfg.Advisors))
+	resp, err := d.asker.Ask(askCtx, tieBreakRequest(req, mode, cands, d.cfg.BoardInState, d.cfg.Advisors, d.cfg.Avoid))
 	if err != nil {
 		gs.fallbacks.Add(1)
 		d.log.Warn("tie-break inference failed, using deterministic move",
@@ -264,12 +315,43 @@ func (d *Decider) Decide(ctx context.Context, req api.GameRequest, gs *GameState
 
 	advice := readAdvice(resp, d.cfg.Advisors)
 
+	// A move struck off as a trap is removed before anything else is decided,
+	// including the model's own move choice. Never the last one standing: the
+	// warning is about what happens later, and being wrong about later is not
+	// worth walking into a wall now.
+	if d.cfg.Avoid && len(cands) > 1 {
+		if ans, answered := resp.Answers["avoid"]; answered && ans.Choice != avoidNothing &&
+			ans.Confidence >= d.cfg.AvoidConfidence {
+			if kept := without(cands, ans.Choice); len(kept) > 0 && len(kept) < len(cands) {
+				if kept[0].Dir != best.Dir {
+					gs.overrides.Add(1)
+				}
+				return Decision{
+					Move:       kept[0].Dir.String(),
+					Reason:     ReasonJevAvoid,
+					Mode:       mode,
+					Candidates: kept,
+					Confidence: ans.Confidence,
+					Latency:    resp.Latency,
+					Tokens:     resp.Usage.InputTokens,
+					Advice:     advice,
+					Avoided:    ans.Choice,
+				}
+			}
+		}
+	}
+
 	// A warning outranks the move. If the model says the position is closing
 	// or that a rival is cutting us off, the standing posture - which may be
 	// pulling us toward food - is the wrong thing to be following, so the move
 	// is re-ranked on survival alone.
 	if advice.Alarmed(d.cfg.AlarmThreshold) {
 		survival := weights(ModeSurvive, req.You.Health, d.cfg.LowHealth)
+		// The tighter the model reads the position, the more room outweighs
+		// everything else. This is a slope rather than a switch, because the
+		// judgment itself is graded.
+		survival.space += advice.Confinement()
+		survival.food *= 1 - advice.Confinement()
 		rescored := d.scoreWith(grid, req, survival, safe)
 		sort.SliceStable(rescored, func(i, j int) bool { return rescored[i].Score > rescored[j].Score })
 		if rescored[0].Dir != best.Dir {
@@ -323,14 +405,11 @@ func readAdvice(resp *jev.Response, asked bool) Advice {
 	if !asked {
 		return Advice{}
 	}
-	a := Advice{Present: true}
-	if ans, ok := resp.Answers["sealed"]; ok {
-		a.Sealed = ans.Noul
+	ans, ok := resp.Answers["room"]
+	if !ok {
+		return Advice{}
 	}
-	if ans, ok := resp.Answers["hunted"]; ok {
-		a.Hunted = ans.Noul
-	}
-	return a
+	return Advice{Room: ans.Score, Confidence: ans.Confidence, Present: true}
 }
 
 // score rates every safe move under the posture's weights.
@@ -521,7 +600,7 @@ func matchCandidate(name string, cands []Candidate) (Candidate, bool) {
 // dropped in favour of a computed digest. And the options offered are only the
 // moves already proven safe, each labelled with its computed consequence, so
 // the model judges trade-offs rather than redoing geometry.
-func tieBreakRequest(req api.GameRequest, mode Mode, cands []Candidate, withBoard, withAdvisors bool) jev.Request {
+func tieBreakRequest(req api.GameRequest, mode Mode, cands []Candidate, withBoard, withAdvisors, withAvoid bool) jev.Request {
 	criteria := make(map[string]string, len(cands))
 	for _, c := range cands {
 		criteria[c.Dir.String()] = describe(c, req.You.Length)
@@ -557,23 +636,32 @@ func tieBreakRequest(req api.GameRequest, mode Mode, cands []Candidate, withBoar
 	// to seal us in. Batching them costs almost nothing because the board is
 	// sent once either way, and the answers are independent of the move.
 	if withAdvisors {
-		questions["sealed"] = jev.Question{
-			Type: jev.TypeNoul,
-			Instructions: "Looking at the board, my snake is about to be shut into a " +
-				"region it cannot get back out of within the next few moves.",
-			Criteria: map[string]string{
-				"true":  "The open space around my head narrows to a pocket or corridor with no way back to the rest of the board.",
-				"false": "My snake still has more than one route into open space, even if the position is tight.",
-			},
+		questions["room"] = jev.Question{
+			Type: jev.TypeScore,
+			Instructions: "Judge how much room my snake has to keep moving, reading the " +
+				"board as a whole rather than one step ahead: where its body and the " +
+				"rivals leave routes out, and where those routes are closing.",
+			Criteria: roomLevels,
 		}
-		questions["hunted"] = jev.Question{
-			Type: jev.TypeNoul,
-			Instructions: "Looking at the board, a rival snake is positioning itself to cut " +
-				"my snake off from the open part of the board.",
-			Criteria: map[string]string{
-				"true":  "A rival is moving across my routes to open space, or curling around my head, rather than heading for food or space of its own.",
-				"false": "The rivals are chasing food, avoiding me, or too far away to shape where I can go.",
-			},
+	}
+
+	// Negative selection, asked over the same board. The move question asks
+	// which option is best, which is largely what the scorer already computed;
+	// this asks what the scorer structurally cannot see, namely which option
+	// looks fine now and closes later.
+	if withAvoid && len(cands) > 1 {
+		avoid := make(map[string]string, len(cands)+1)
+		for _, c := range cands {
+			avoid[c.Dir.String()] = describe(c, req.You.Length)
+		}
+		avoid[avoidNothing] = "None of these moves leads into trouble; they all keep a way out."
+		questions["avoid"] = jev.Question{
+			Type: jev.TypeChoice,
+			Instructions: "Every one of these moves is safe this turn. Reading the whole " +
+				"board, which one is most likely to leave my snake trapped or eliminated " +
+				"within the next few moves - a pocket that closes, a corridor with no way " +
+				"back, or a rival arriving first? Answer none if they all keep a way out.",
+			Criteria: avoid,
 		}
 	}
 
