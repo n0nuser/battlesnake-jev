@@ -5,7 +5,7 @@ RULES_VERSION    := v1.2.3
 
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: all check fmt fmt-fix vet lint test build run tools hooks e2e clean
+.PHONY: all check fmt fmt-fix vet lint test build run tools hooks tournament e2e clean
 
 all: check
 
@@ -68,6 +68,14 @@ tools:
 hooks:
 	install -m 0755 scripts/pre-push .git/hooks/pre-push
 	@echo "installed .git/hooks/pre-push -> make check"
+
+## tournament: batch of local games, tallied. GAMES/MODE/SEED/LABEL/JEV_ENV override.
+GAMES ?= 20
+MODE  ?= duel
+SEED  ?= 9000
+LABEL ?= run
+tournament:
+	scripts/tournament.sh -n $(GAMES) -m $(MODE) -s $(SEED) -l $(LABEL)
 
 ## e2e: a local game against ourselves. Requires 'make tools' and a running server.
 e2e:

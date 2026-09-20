@@ -99,7 +99,9 @@ func (h *Handler) handleMove(w http.ResponseWriter, r *http.Request) {
 	gs := h.store.Get(stateKey(req))
 	decision := h.decider.Decide(ctx, req, gs)
 
-	writeJSON(w, api.MoveResponse{Move: decision.Move}, h.log)
+	// The shout renders on the game board, so it is where a spectator can see
+	// which of the two decided this move and on what grounds.
+	writeJSON(w, api.MoveResponse{Move: decision.Move, Shout: decision.Shout()}, h.log)
 
 	h.log.Debug("move",
 		"game", req.Game.ID, "turn", req.Turn, "move", decision.Move,
