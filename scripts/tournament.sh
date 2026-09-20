@@ -86,7 +86,9 @@ misses=$(grep -o 'fallbacks=[0-9]*' "$WORK/jev.log" | cut -d= -f2 | paste -sd+ |
 
 echo
 echo "RESULT $LABEL: jev=$jev_wins det=$det_wins draw=$draws of $GAMES ($MODE)"
-grep -o 'reasons=[a-z,=0-9-]*' "$WORK/jev.log" | cut -d= -f2- | tr ',' '\n' | awk -F= '{t[$1]+=$2} END {printf "PATHS  "; for (k in t) printf "%s=%d ", k, t[k]; print ""}' 
+# slog quotes the value because it contains '=', so strip the quotes first.
+grep -o 'reasons="[^"]*"' "$WORK/jev.log" | sed 's/reasons="//; s/"$//' | tr ',' '\n' \
+  | awk -F= '{t[$1]+=$2} END {printf "PATHS  "; for (k in t) printf "%s=%d ", k, t[k]; print ""}' 
 printf 'COST   %s: calls=%s tokens=%s cost=$%s overrides=%s deadline_misses=%s\n' \
   "$LABEL" "$calls" "${tokens:-0}" \
   "$(python3 -c "print(f'{${tokens:-0}*0.042/1e6:.4f}')")" "$overrides" "$misses"

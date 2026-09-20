@@ -62,13 +62,53 @@ times the tokens. It exists as a measurement mode, not a playing mode.
 
 Seeds 9001-9020, 11x11, `-t 2000`, one Jev snake against one deterministic one.
 
-| Configuration | Jev | Det | Draw | Tokens | Cost |
+| Who breaks the close calls | Jev | Det | Draw | Tokens | Cost |
 | --- | --- | --- | --- | --- | --- |
-| Default (board, selective tie-break) | 9 | 10 | 1 | 555,819 | $0.0233 |
-| Plus advisory nouls | 8 | 10 | 2 | 690,123 | $0.0290 |
+| The model | 9 | 10 | 1 | 555,819 | $0.0233 |
+| The model, plus advisory nouls | 8 | 10 | 2 | 690,123 | $0.0290 |
+| The model, plus negative selection | 6 | 13 | 1 | 631,369 | $0.0265 |
+| **A coin** | **2** | **18** | **0** | 0 | $0.0000 |
 
-Neither is distinguishable from a coin flip, and the second comparison turned
-out to measure nothing at all - see below.
+The control is the interesting row. Reading only the first three, the model
+looks like it is contributing nothing: three arms, all indistinguishable from
+a coin flip, and the more authority it is given the worse it does.
+
+Then the same decisions handed to an actual coin lose 2-18.
+
+So the model is not choosing at random on these turns. It is finding something
+worth roughly seven games in twenty over chance, and the earlier reading - that
+it "adds nothing" - was wrong, because it was missing the floor.
+
+What it is not doing is beating the scorer's own tie-break. Handing the same
+close calls to the code's fixed direction preference - no API calls at all -
+goes 8-10-2, which the model's 9-10-1 does not separate from.
+
+| Who breaks the close calls | Jev | Det | Draw | Calls | Cost |
+| --- | --- | --- | --- | --- | --- |
+| A coin | 2 | 18 | 0 | 0 | $0.0000 |
+| The code's own fixed ordering | 8 | 10 | 2 | 0 | $0.0000 |
+| The model | 9 | 10 | 1 | 1021 | $0.0233 |
+
+So the honest reading, at n=20 per arm, is that the model matches a fixed
+direction preference and both beat chance by a mile.
+
+That second part is worth stating plainly, because it is the least obvious
+thing measured here: in Battlesnake, *committing* to a direction is most of
+what breaking a tie is for. A snake that picks randomly between two
+equally-scored moves wanders, and wandering fills in its own escape routes. The
+scorer's arbitrary-but-consistent preference is already most of the available
+value, which leaves the model very little room to add any.
+
+Path counts from the ordering arm, over 2,938 decisions in 20 games, show how
+often any of this is even in play:
+
+| Path | Turns | Share |
+| --- | --- | --- |
+| Options identical in every measured way | 1,591 | 54% |
+| Close enough to hand to the tie-breaker | 976 | 33% |
+| Only one safe move | 218 | 7% |
+| Deterministic scores decisive | 151 | 5% |
+| Nothing safe | 2 | <1% |
 
 ## The advisory questions do not carry enough signal
 
