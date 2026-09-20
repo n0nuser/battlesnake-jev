@@ -5,7 +5,7 @@ RULES_VERSION    := v1.2.3
 
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: all check fmt fmt-fix vet lint test build run tools hooks tournament e2e clean
+.PHONY: all check fmt fmt-fix vet lint test build run tools hooks tournament replay e2e clean
 
 all: check
 
@@ -76,6 +76,20 @@ SEED  ?= 9000
 LABEL ?= run
 tournament:
 	scripts/tournament.sh -n $(GAMES) -m $(MODE) -s $(SEED) -l $(LABEL)
+
+## replay: render a recorded game as an mp4 and a gif.
+##   REC=<game.jsonl> LOG=<server debug log> OUT=<dir> VIEW=hero|split
+REC  ?= game.jsonl
+LOG  ?= server.log
+OUT  ?= replay
+VIEW ?= hero
+replay:
+	python3 scripts/render_replay.py $(REC) $(LOG) $(OUT)/frames $(VIEW) \
+		"One model snake, three deterministic bots" \
+		"Jev decides only the close calls. Safety is never delegated."
+	ffmpeg -y -framerate 9 -i $(OUT)/frames/f%05d.png -c:v libx264 -pix_fmt yuv420p $(OUT).mp4
+	ffmpeg -y -framerate 9 -i $(OUT)/frames/f%05d.png \
+		-vf "fps=9,scale=800:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" $(OUT).gif
 
 ## e2e: a local game against ourselves. Requires 'make tools' and a running server.
 e2e:

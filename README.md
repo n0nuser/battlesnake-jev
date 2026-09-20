@@ -115,6 +115,11 @@ battlesnake play -W 11 -H 11 -t 2000 \
   --name det --url http://localhost:8081 --browser
 
 make tournament GAMES=20 MODE=duel LABEL=whatever
+
+# render a recorded game as video: the board, plus who decided each move
+battlesnake play ... -o game.jsonl          # record the game
+LOG_LEVEL=debug make run                    # with the decision log
+make replay REC=game.jsonl LOG=server.log OUT=replay VIEW=hero
 ```
 
 `TYPESAFE_API_KEY` enables inference. Without it the snake plays entirely
